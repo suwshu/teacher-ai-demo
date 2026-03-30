@@ -21,11 +21,20 @@ function loadTeachers(): Teacher[] {
 }
 
 function searchTeachers(query: string, teachers: Teacher[]): Teacher[] {
-  const keywords = query.toLowerCase().split(/\s+/);
+  // 中文分词：按字拆分 + 按词拆分（2-4字的子串）
+  const chars = query.split("");
+  const words: string[] = [];
+  for (let len = 2; len <= 6; len++) {
+    for (let i = 0; i <= query.length - len; i++) {
+      words.push(query.slice(i, i + len));
+    }
+  }
+  const keywords = [...new Set([...chars, ...words])].filter((k) => k.trim().length > 0);
+
   const scored = teachers.map((t) => {
-    const text = (t.name + t.content).toLowerCase();
+    const text = t.name + t.content;
     const score = keywords.reduce(
-      (acc, kw) => acc + (text.includes(kw) ? 1 : 0),
+      (acc, kw) => acc + (text.includes(kw) ? kw.length : 0),
       0
     );
     return { teacher: t, score };
@@ -33,22 +42,18 @@ function searchTeachers(query: string, teachers: Teacher[]): Teacher[] {
   return scored
     .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 8)
+    .slice(0, 6)
     .map((s) => s.teacher);
 }
 
 const SYSTEM_PROMPT = `你是一个专业的讲师库AI助手，帮助企业培训运营人员快速找到合适的讲师。
 
-你有能力：
-1. 根据用户需求（课题、行业背景、城市、价格等）推荐最匹配的讲师
-2. 解析和分析讲师简历，提取关键信息
-3. 回答关于讲师的具体问题
-
-回答规范：
-- 推荐讲师时，每位讲师单独列出，包含：姓名、核心背景、擅长课题、推荐理由
-- 语言简洁专业，突出匹配点
-- 如果信息不足，主动追问需求细节
-- 用中文回答`;
+【重要规则】
+- 如果上下文中提供了讲师资料，你必须直接基于这些资料推荐讲师，不得说"没有数据"或"需要技术对接"
+- 直接推荐，不要反复追问细节，用户可以在看到推荐后再追问
+- 每位讲师单独列出：姓名、核心背景、擅长课题、推荐理由
+- 语言简洁专业，用中文回答
+- 如果没有找到相关讲师资料，才可以说暂无匹配，并请用户换个关键词`;
 
 export async function POST(req: NextRequest) {
   const { messages, mode } = await req.json();
