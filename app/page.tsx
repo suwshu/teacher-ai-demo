@@ -9,6 +9,13 @@ type Message = {
 
 type Mode = "search" | "intake";
 
+type Teacher = {
+  name: string;
+  folder_id: string;
+  content: string;
+  file_count: number;
+};
+
 const PLACEHOLDER = {
   search: "例如：找一个能给银行中高层讲数字化转型的讲师，最好有大厂背景，在华东地区…",
   intake: "请描述新讲师信息，或直接粘贴简历文本，AI将自动提取并整理成标准档案…",
@@ -19,13 +26,48 @@ const WELCOME = {
   intake: "你好！请把新讲师的简历文本粘贴进来，或描述讲师的基本信息。\n\nAI将自动提取：姓名、背景、擅长课题、代表客户、报价等关键字段，生成标准化档案。",
 };
 
+function searchTeachers(query: string, teachers: Teacher[]): Teacher[] {
+  const words: string[] = [];
+  for (let len = 2; len <= 6; len++) {
+    for (let i = 0; i <= query.length - len; i++) {
+      words.push(query.slice(i, i + len));
+    }
+  }
+  const keywords = [...new Set([...query.split(""), ...words])].filter(
+    (k) => k.trim().length > 0
+  );
+
+  const scored = teachers.map((t) => {
+    const text = t.name + t.content;
+    const score = keywords.reduce(
+      (acc, kw) => acc + (text.includes(kw) ? kw.length : 0),
+      0
+    );
+    return { teacher: t, score };
+  });
+
+  return scored
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6)
+    .map((s) => s.teacher);
+}
+
 export default function Home() {
   const [mode, setMode] = useState<Mode>("search");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // 页面加载时从public目录获取讲师数据
+  useEffect(() => {
+    fetch("/teachers_index.json")
+      .then((r) => r.json())
+      .then((data: Teacher[]) => setTeachers(data))
+      .catch(() => console.error("讲师数据加载失败"));
+  }, []);
 
   useEffect(() => {
     setMessages([{ role: "assistant", content: WELCOME[mode] }]);
@@ -46,10 +88,21 @@ export default function Home() {
     setLoading(true);
 
     try {
+      // 在前端做搜索，把匹配结果传给API
+      let context = "";
+      if (mode === "search" && teachers.length > 0) {
+        const matched = searchTeachers(text, teachers);
+        if (matched.length > 0) {
+          context = matched
+            .map((t) => `---\n讲师姓名：${t.name}\n${t.content.slice(0, 1500)}`)
+            .join("\n");
+        }
+      }
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages, mode }),
+        body: JSON.stringify({ messages: newMessages, context }),
       });
 
       if (!res.body) throw new Error("No stream");
@@ -88,12 +141,12 @@ export default function Home() {
   }
 
   function formatContent(text: string) {
-    return text.split("\n").map((line, i) => {
+    return text.split("\n").map((line, i, arr) => {
       const bold = line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
       return (
         <span key={i}>
           <span dangerouslySetInnerHTML={{ __html: bold }} />
-          {i < text.split("\n").length - 1 && <br />}
+          {i < arr.length - 1 && <br />}
         </span>
       );
     });
@@ -109,17 +162,16 @@ export default function Home() {
           </div>
           <div>
             <h1 className="text-sm font-semibold tracking-wide">讲师库 AI 助手</h1>
-            <p className="text-xs text-white/40">491位讲师 · 智能检索与管理</p>
+            <p className="text-xs text-white/40">
+              {teachers.length > 0 ? `${teachers.length}位讲师 · 智能检索与管理` : "数据加载中…"}
+            </p>
           </div>
         </div>
-        {/* Mode Switch */}
         <div className="flex bg-white/5 rounded-lg p-1 gap-1">
           <button
             onClick={() => setMode("search")}
             className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all ${
-              mode === "search"
-                ? "bg-amber-400 text-black"
-                : "text-white/50 hover:text-white/80"
+              mode === "search" ? "bg-amber-400 text-black" : "text-white/50 hover:text-white/80"
             }`}
           >
             检索讲师
@@ -127,9 +179,7 @@ export default function Home() {
           <button
             onClick={() => setMode("intake")}
             className={`px-4 py-1.5 rounded-md text-xs font-medium transition-all ${
-              mode === "intake"
-                ? "bg-amber-400 text-black"
-                : "text-white/50 hover:text-white/80"
+              mode === "intake" ? "bg-amber-400 text-black" : "text-white/50 hover:text-white/80"
             }`}
           >
             录入讲师
@@ -141,10 +191,7 @@ export default function Home() {
       <main className="flex-1 overflow-y-auto px-4 py-6 max-w-3xl mx-auto w-full">
         <div className="flex flex-col gap-6">
           {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}
-            >
+            <div key={i} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
               <div
                 className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold mt-0.5 ${
                   msg.role === "user"
@@ -161,7 +208,9 @@ export default function Home() {
                     : "bg-white/5 text-white/85 rounded-tl-sm"
                 }`}
               >
-                {msg.content ? formatContent(msg.content) : (
+                {msg.content ? (
+                  formatContent(msg.content)
+                ) : (
                   <span className="inline-flex gap-1">
                     <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
                     <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
@@ -171,18 +220,6 @@ export default function Home() {
               </div>
             </div>
           ))}
-          {loading && messages[messages.length - 1]?.role !== "assistant" && (
-            <div className="flex gap-3">
-              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-xs font-bold text-black">AI</div>
-              <div className="bg-white/5 rounded-2xl rounded-tl-sm px-4 py-3">
-                <span className="inline-flex gap-1">
-                  <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                </span>
-              </div>
-            </div>
-          )}
           <div ref={bottomRef} />
         </div>
       </main>
@@ -192,14 +229,12 @@ export default function Home() {
         <div className="max-w-3xl mx-auto flex gap-3 items-end">
           <div className="flex-1 bg-white/5 border border-white/10 rounded-2xl px-4 py-3 focus-within:border-amber-400/50 transition-colors">
             <textarea
-              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKey}
               placeholder={PLACEHOLDER[mode]}
               rows={1}
               className="w-full bg-transparent text-sm text-white/90 placeholder-white/25 resize-none outline-none leading-6 max-h-32"
-              style={{ minHeight: "24px" }}
               onInput={(e) => {
                 const t = e.currentTarget;
                 t.style.height = "auto";
@@ -213,7 +248,7 @@ export default function Home() {
             className="w-10 h-10 rounded-full bg-amber-400 hover:bg-amber-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center justify-center flex-shrink-0"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 2L8 14M8 2L3 7M8 2L13 7" stroke="black" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M8 2L8 14M8 2L3 7M8 2L13 7" stroke="black" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
         </div>
