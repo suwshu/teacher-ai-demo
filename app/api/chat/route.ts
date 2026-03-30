@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import OpenAI from "openai";
-import { readFileSync } from "fs";
-import { join } from "path";
+import teachersData from "../../../public/teachers_index.json";
 
 const client = new OpenAI({
   apiKey: process.env.API_KEY,
@@ -15,13 +14,9 @@ type Teacher = {
   file_count: number;
 };
 
-let teachersCache: Teacher[] | null = null;
+const teachersCache: Teacher[] = teachersData as Teacher[];
 
 function loadTeachers(): Teacher[] {
-  if (teachersCache) return teachersCache;
-  const filePath = join(process.cwd(), "public", "teachers_index.json");
-  const raw = readFileSync(filePath, "utf-8");
-  teachersCache = JSON.parse(raw) as Teacher[];
   return teachersCache;
 }
 
