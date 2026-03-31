@@ -59,13 +59,17 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [dataReady, setDataReady] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // 页面加载时从public目录获取讲师数据
   useEffect(() => {
     fetch("/teachers_index.json")
       .then((r) => r.json())
-      .then((data: Teacher[]) => setTeachers(data))
+      .then((data: Teacher[]) => {
+        setTeachers(data);
+        setDataReady(true);
+      })
       .catch(() => console.error("讲师数据加载失败"));
   }, []);
 
@@ -244,7 +248,7 @@ export default function Home() {
           </div>
           <button
             onClick={send}
-            disabled={loading || !input.trim()}
+            disabled={loading || !input.trim() || !dataReady}
             className="w-10 h-10 rounded-full bg-amber-400 hover:bg-amber-300 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center justify-center flex-shrink-0"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
